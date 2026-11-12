@@ -771,6 +771,9 @@ Navicat 的普通单表查询会返回原库名、表名、列名及主键/自�
 表数据；`SHOW TABLE STATUS` 和 `information_schema.TABLES` 的行数/大小统计按已提交快照缓存，
 提交写入、表结构变化或恢复备份后失效。首次读取或失效后的统计仍需扫描表及索引，大表可能耗时；
 精确计算当前 SQL 事务可见的行数请使用 `SELECT COUNT(*) FROM 表名`。
+连接时兼容 Navicat 合并发送的 `lower_case_%`、`sql_mode` 和 NDB 引擎检查三条只读探测，
+按 MySQL 多结果集协议返回；仍不提供任意多语句执行。
+`COM_FIELD_LIST` 字段列表会携带默认值（含 NULL 和空字符串），供原生 MySQL 客户端解析表结构。
 
 ```sql
 CREATE DATABASE test;

@@ -54,6 +54,7 @@ type Result struct {
 	LastInsertID       uint64
 	Message            string
 	MetadataChanged    bool
+	MoreResults        bool
 	cleanupOnce        sync.Once
 	cleanup            func()
 }

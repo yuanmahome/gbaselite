@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -496,6 +497,23 @@ func virtualDatabase(name string) bool {
 }
 
 func (s *MySQLServer) handleQuery(packet *protocol.PacketConn, session *executor.Session, query string) {
+	queries := []string{query}
+	if packet.Capabilities&protocol.ClientMultiResults != 0 && navicatProbeBatch.MatchString(query) {
+		queries = []string{"SHOW VARIABLES LIKE 'lower_case_%'", "SHOW VARIABLES LIKE 'sql_mode'", "SELECT COUNT(*) AS support_ndb FROM information_schema.ENGINES WHERE Engine = 'ndbcluster'"}
+	}
+	for i, statement := range queries {
+		if !s.handleQueryResult(packet, session, statement, i+1 < len(queries)) {
+			return
+		}
+	}
+}
+
+// Navicat sends this read-only bootstrap batch even without negotiating
+// CLIENT_MULTI_STATEMENTS. Accept only this complete probe, never a prefix or
+// arbitrary statements, and retain the normal privilege checks for each query.
+var navicatProbeBatch = regexp.MustCompile(`(?is)^\s*SHOW\s+VARIABLES\s+LIKE\s+'lower_case_%'\s*;\s*SHOW\s+VARIABLES\s+LIKE\s+'sql_mode'\s*;\s*SELECT\s+COUNT\s*\(\s*\*\s*\)\s+AS\s+support_ndb\s+FROM\s+information_schema\.ENGINES\s+WHERE\s+Engine\s*=\s*'ndbcluster'\s*;?\s*$`)
+
+func (s *MySQLServer) handleQueryResult(packet *protocol.PacketConn, session *executor.Session, query string, more bool) bool {
 	started := time.Now()
 	result, err := s.executeCompatible(session, query)
 	if err != nil {
@@ -505,16 +523,19 @@ func (s *MySQLServer) handleQuery(packet *protocol.PacketConn, session *executor
 		s.auditQuery(session, session.RemotePort, query, started, nil, err)
 		s.logSlowQuery(query, started)
 		_ = packet.WritePacket(protocol.ErrorPacket(mysqlExecutionErrorCode(err), mysqlErrorMessage(err)))
-		return
+		return false
 	}
+	result.MoreResults = more
 	if err := protocol.WriteResult(packet, result, session.CurrentDatabase, ""); err != nil {
 		s.Logger.Printf("write result error: %v", err)
 		s.logSlowQuery(query, started)
 		s.auditQuery(session, session.RemotePort, query, started, result, err)
+		return false
 	} else {
 		s.logSlowQuery(query, started)
 		s.auditQuery(session, session.RemotePort, query, started, result, nil)
 	}
+	return true
 }
 
 func (s *MySQLServer) executeCompatible(session *executor.Session, query string) (*executor.Result, error) {
@@ -724,6 +745,7 @@ func (s *MySQLServer) handleFieldList(packet *protocol.PacketConn, session *exec
 		_ = packet.WritePacket(protocol.ErrorPacket(1146, err.Error()))
 		return
 	}
+	defer result.Close()
 	for _, row := range result.Rows {
 		columnType := storage.TypeVarchar
 		columnLength := 0
@@ -756,7 +778,15 @@ func (s *MySQLServer) handleFieldList(packet *protocol.PacketConn, session *exec
 		if len(row) > 5 {
 			column.AutoIncrement = strings.Contains(strings.ToLower(fmt.Sprint(row[5])), "auto_increment")
 		}
-		_ = packet.WritePacket(protocol.ColumnDefinition(column, session.CurrentDatabase, tableName))
+		definition := protocol.ColumnDefinition(column, session.CurrentDatabase, tableName)
+		// COM_FIELD_LIST adds a length-encoded default after ColumnDefinition41.
+		// Omitting it makes native clients retry metadata or wait for a timeout.
+		if len(row) <= 4 || row[4] == nil {
+			definition = append(definition, 0xfb)
+		} else {
+			definition = protocol.AppendLenEncString(definition, []byte(fmt.Sprint(row[4])))
+		}
+		_ = packet.WritePacket(definition)
 	}
 	_ = packet.WritePacket(protocol.ResultEOFPacket(&executor.Result{InTransaction: session.InTransaction(), AutocommitDisabled: session.AutocommitDisabled}))
 }

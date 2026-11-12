@@ -339,6 +339,7 @@ func sessionVariableValues(session *executor.Session, global bool) [][]any {
 		{"collation_server", executor.DefaultCollation},
 		{"innodb_lock_wait_timeout", lockWait},
 		{"lower_case_table_names", "1"},
+		{"sql_mode", ""},
 		{"system_time_zone", time.Local.String()},
 		{"time_zone", timeZone},
 		{"transaction_isolation", isolation},

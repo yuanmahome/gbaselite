@@ -73,7 +73,7 @@ func TestNavicatGridWritesAndCountsOverTCP(t *testing.T) {
 	srv := &MySQLServer{Engine: e, Logger: log.New(io.Discard, "", 0)}
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(listener) }()
-	db, err := sql.Open("mysql", "root:secret@tcp("+listener.Addr().String()+")/?timeout=3s&readTimeout=3s&writeTimeout=3s")
+	db, err := sql.Open("mysql", "root:secret@tcp("+listener.Addr().String()+")/?timeout=3s&readTimeout=3s&writeTimeout=3s&multiStatements=true")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,6 +85,36 @@ func TestNavicatGridWritesAndCountsOverTCP(t *testing.T) {
 		srv.Shutdown(ctx)
 		<-done
 	}()
+	batch := "SHOW VARIABLES LIKE 'lower_case_%'; SHOW VARIABLES LIKE 'sql_mode'; SELECT COUNT(*) AS support_ndb FROM information_schema.ENGINES WHERE Engine = 'ndbcluster'"
+	rows, err := db.Query(batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for set, wantRows := range []int{1, 1, 1} {
+		count := 0
+		for rows.Next() {
+			if set == 2 {
+				var support int
+				if err := rows.Scan(&support); err != nil || support != 0 {
+					t.Fatalf("NDB support=%d err=%v", support, err)
+				}
+			}
+			count++
+		}
+		if rows.Err() != nil || count != wantRows {
+			t.Fatalf("probe set=%d rows=%d want=%d err=%v", set, count, wantRows, rows.Err())
+		}
+		if next := rows.NextResultSet(); next != (set < 2) {
+			t.Fatalf("probe set=%d next=%v err=%v", set, next, rows.Err())
+		}
+	}
+	rows.Close()
+	if err := db.Ping(); err != nil {
+		t.Fatalf("batch desynchronized connection: %v", err)
+	}
+	if _, err := db.Exec(batch + "; CREATE DATABASE unexpected_probe_suffix"); err == nil {
+		t.Fatal("arbitrary batch suffix accepted")
+	}
 	exec := func(q string, args ...any) sql.Result {
 		t.Helper()
 		r, err := db.Exec(q, args...)

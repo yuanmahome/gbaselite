@@ -246,6 +246,9 @@ func resultStatus(result *executor.Result) uint16 {
 	if result.MetadataChanged {
 		status |= serverStatusMetadataChanged
 	}
+	if result.MoreResults {
+		status |= 0x0008 // SERVER_MORE_RESULTS_EXISTS
+	}
 	return status
 }
 
