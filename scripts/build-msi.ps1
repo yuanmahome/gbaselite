@@ -69,6 +69,18 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
 $OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
 New-Item -ItemType Directory -Path (Split-Path -Parent $OutputPath) -Force | Out-Null
 
+# MSBuild/WiX must not reuse a system temp folder owned by another account or
+# elevation level. Give each invocation its own directory and restore the caller.
+$buildTemporaryRoot = Join-Path $repositoryRoot (".tmp\msi-temp-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $buildTemporaryRoot -Force | Out-Null
+$previousTemp = $env:TEMP
+$previousTmp = $env:TMP
+$previousNugetHttpCache = $env:NUGET_HTTP_CACHE_PATH
+try {
+$env:TEMP = $buildTemporaryRoot
+$env:TMP = $buildTemporaryRoot
+$env:NUGET_HTTP_CACHE_PATH = Join-Path $buildTemporaryRoot "nuget-http"
+
 $uiAssetScript = Join-Path $repositoryRoot "installer\wix\ui-assets.ps1"
 $licenseSource = Join-Path $repositoryRoot "installer\wix\license.zh-CN.txt"
 if (-not (Test-Path -LiteralPath $uiAssetScript) -or -not (Test-Path -LiteralPath $licenseSource)) {
@@ -137,7 +149,7 @@ foreach ($requiredPattern in @(
 }
 $customActionOutput = Join-Path $repositoryRoot ".tmp\msi-custom-action-$Version"
 New-Item -ItemType Directory -Path $customActionOutput -Force | Out-Null
-& $dotnet.Source build $customActionProject --configuration Release --output $customActionOutput --nologo
+& $dotnet.Source build $customActionProject --configuration Release --output $customActionOutput --nologo --force
 if ($LASTEXITCODE -ne 0) {
     throw "Unable to build the MSI custom action"
 }
@@ -275,3 +287,16 @@ if ($LASTEXITCODE -ne 0) {
 Remove-MsiMaintenanceBlocks -MsiPath $OutputPath
 
 Get-Item -LiteralPath $OutputPath | Select-Object FullName, Length, LastWriteTime
+} finally {
+    $env:TEMP = $previousTemp
+    $env:TMP = $previousTmp
+    $env:NUGET_HTTP_CACHE_PATH = $previousNugetHttpCache
+    $resolvedTemporaryRoot = [System.IO.Path]::GetFullPath($buildTemporaryRoot)
+    $allowedTemporaryPrefix = [System.IO.Path]::GetFullPath((Join-Path $repositoryRoot ".tmp")) + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $resolvedTemporaryRoot.StartsWith($allowedTemporaryPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Unsafe MSI temporary directory cleanup path: $resolvedTemporaryRoot"
+    }
+    if (Test-Path -LiteralPath $resolvedTemporaryRoot) {
+        Remove-Item -LiteralPath $resolvedTemporaryRoot -Recurse -Force
+    }
+}

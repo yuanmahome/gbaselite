@@ -1220,7 +1220,9 @@ README、版本化裸二进制 Compose 路径、环境示例、工作流默认�
 `latest`。Docker CLI 或 Compose 不可用时会给出警告并跳过该项检查。
 
 首次运行缺少 .NET SDK、WiX 或中文 UI 扩展时，脚本会下载到 `.tmp` 或用户 WiX 扩展
-缓存，不修改系统 `PATH`；即使手工清空 `.tmp`，下次发布也会重新下载并重建缓存。发
+缓存，不修改系统 `PATH`；即使手工清空 `.tmp`，下次发布也会重新下载并重建缓存。
+MSI 构建为每次调用在 `.tmp/msi-temp-<随机标识>` 下创建独立的 `TEMP`/`TMP` 和 NuGet HTTP 缓存，
+避免系统临时目录中 `MSBuildTemp` 或用户缓存的权限冲突；成功或失败后都恢复原环境并清理本次临时文件。发
 布入口和 PowerShell 构建脚本统一使用 UTF-8 控制台编码，`.NET`、WiX 及中文警告不
 会在 CMD 或 Windows Terminal 中显示为乱码。安装器输出只显示在终端，不会混入后续
 工具路径。格式检查只遍历项目源码，跳过 `.tmp`、隐藏目录、`data`、`logs`、`dist`、`bin`、`release`、`vendor`、`node_modules` 和重解析点；不会因下载工具缓存中的第三方 Go 源码报错。新增且尚未提交的包、Windows/Linux 平台源码仍会检查，项目源码格式不合格仍会阻止发布。`--self-test` 同时验证此检查范围。双击执行结束后窗口会保留；自动化调用可使用：

@@ -14,6 +14,12 @@ releases.
 
 ## [Unreleased]
 
+### Fixed
+
+- Isolate MSI build TEMP/TMP and NuGet HTTP cache under a unique workspace directory and restore the
+  caller's environment after success or failure, avoiding MSBuildTemp permission
+  conflicts from system temporary directories.
+
 ## [1.1.5] - 2026-09-13
 
 ### Changed
