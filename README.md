@@ -774,6 +774,9 @@ Navicat 的普通单表查询会返回原库名、表名、列名及主键/自�
 连接时兼容 Navicat 合并发送的 `lower_case_%`、`sql_mode` 和 NDB 引擎检查三条只读探测，
 按 MySQL 多结果集协议返回；仍不提供任意多语句执行。
 `COM_FIELD_LIST` 字段列表会携带默认值（含 NULL 和空字符串），供原生 MySQL 客户端解析表结构。
+本机服务配置为 `server.host: 127.0.0.1` 时，Navicat 连接的主机也应填 `127.0.0.1`。
+填写 `localhost` 可能使客户端先尝试 IPv6 `::1`，在仅监听 IPv4 的服务上等待失败后再回退；
+这会在每次新建连接时额外耗时（Windows 本机实测约 2 秒），包括打开表时客户端创建的辅助连接。
 
 ```sql
 CREATE DATABASE test;
