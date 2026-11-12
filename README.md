@@ -766,6 +766,12 @@ Copy-Item .\gbaselite-new.exe .\bin\gbaselite.exe
 本节只保留快速确认服务可用的 SQL。面向业务使用者的循序教程、可直接运行的练习脚本
 和 Navicat 使用说明见 [SQL 使用教程](docs/使用文档/SQL使用教程.md)。
 
+Navicat 的普通单表查询会返回原库名、表名、列名及主键/自增标记，供表格直接编辑使用；
+表达式、联表、派生表和聚合结果不标记为可直接编辑的基表列。只枚举表名的元数据查询不扫描
+表数据；`SHOW TABLE STATUS` 和 `information_schema.TABLES` 的行数/大小统计按已提交快照缓存，
+提交写入、表结构变化或恢复备份后失效。首次读取或失效后的统计仍需扫描表及索引，大表可能耗时；
+精确计算当前 SQL 事务可见的行数请使用 `SELECT COUNT(*) FROM 表名`。
+
 ```sql
 CREATE DATABASE test;
 USE test;

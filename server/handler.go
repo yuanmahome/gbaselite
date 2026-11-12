@@ -877,6 +877,7 @@ func tableInformationInDatabase(engine *executor.Engine, session *executor.Sessi
 		tableType = strings.ToUpper(match[1])
 	}
 	if tableType == "" || tableType == "BASE TABLE" {
+		needsStatistics := metadataNeedsTableStatistics(query)
 		for _, name := range database.ListTables() {
 			if !engine.Users.HasObjectAccess(session.Username, session.Host, database.Name(), name) {
 				continue
@@ -885,7 +886,11 @@ func tableInformationInDatabase(engine *executor.Engine, session *executor.Sessi
 				continue
 			}
 			table, _ := database.Table(name)
-			result.Rows = append(result.Rows, informationSchemaTableRow(database.Name(), table, liveTableStatistics(engine, database.Name(), name, table)))
+			var statistics executor.TableStatistics
+			if needsStatistics {
+				statistics = liveTableStatistics(engine, database.Name(), name, table)
+			}
+			result.Rows = append(result.Rows, informationSchemaTableRow(database.Name(), table, statistics))
 		}
 	}
 	if tableType == "" || tableType == "VIEW" {
@@ -1016,9 +1021,41 @@ func informationSchemaTableRow(schema string, table *storage.Table, statistics e
 	return []any{"def", schema, table.Name(), "BASE TABLE", "GBaseLite", int64(10), "Dynamic", rows, averageLength, statistics.DataLength, int64(0), statistics.IndexLength, int64(0), nil, createdAt, updatedAt, nil, "utf8mb4_general_ci", nil, "", comment}
 }
 
-// liveTableStatistics reports the row count and encoded sizes of one MVCC table.
-// The metadata mirror lists definitions without rows, so the numbers come from the
-// backend; virtual schemas and non-MVCC stores fall back to the mirror table.
+func metadataNeedsTableStatistics(query string) bool {
+	statement, err := parser.Parse(query)
+	if err != nil {
+		return true
+	}
+	selectStmt, ok := statement.(parser.Select)
+	if !ok {
+		return true
+	}
+	for _, item := range selectStmt.Items {
+		expression, err := parser.ParseExpression(item.Expression)
+		if err != nil {
+			return true
+		}
+		if function, ok := expression.(parser.FunctionExpr); ok && strings.EqualFold(function.Name, "COUNT") && function.Star {
+			continue
+		}
+		identifier, ok := expression.(parser.Identifier)
+		if !ok {
+			return true
+		}
+		name := identifier.Name
+		if dot := strings.LastIndexByte(name, '.'); dot >= 0 {
+			name = name[dot+1:]
+		}
+		switch strings.ToUpper(name) {
+		case "*", "TABLE_ROWS", "AVG_ROW_LENGTH", "DATA_LENGTH", "INDEX_LENGTH":
+			return true
+		}
+	}
+	return false
+}
+
+// liveTableStatistics reports committed row counts and encoded sizes from the
+// backend because the protocol metadata mirror carries definitions without rows.
 func liveTableStatistics(engine *executor.Engine, database, name string, table *storage.Table) executor.TableStatistics {
 	fallback := executor.TableStatistics{Rows: int64(table.RowCount()), DataLength: table.DataLength()}
 	if engine == nil {

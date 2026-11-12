@@ -150,6 +150,44 @@ func bindPhysicalSelect(ctx context.Context, tx storageengine.Txn, session *Sess
 	query, err := bindSelectOutput(session, statement, schema, op, ordered)
 	if query != nil {
 		query.Access = &plan
+		// Only direct projections of a base table carry editable column identity.
+		// Derived relations and expressions must not masquerade as stored columns.
+		if !statement.Distinct && len(statement.GroupBy) == 0 && statement.Having == nil && !selectHasAggregate(statement.Items) && !selectHasWindow(statement.Items) {
+			database, table, _ := versionedName(session, statement.Table)
+			at := 0
+			inherit := func(position int) {
+				source := definition.Definition.Columns[position]
+				c := &query.Columns[at]
+				c.Schema, c.Table, c.OriginalName = database, table, source.Name
+				c.Length, c.Nullable, c.AutoIncrement = source.Length, storage.ColumnNullable(source), source.AutoIncrement
+				for _, index := range definition.Definition.Indexes {
+					for _, name := range index.Columns {
+						if strings.EqualFold(name, source.Name) {
+							c.PrimaryKey = c.PrimaryKey || index.Primary
+							c.UniqueKey = c.UniqueKey || index.Unique
+							c.MultipleKey = c.MultipleKey || (!index.Primary && !index.Unique)
+						}
+					}
+				}
+			}
+			for _, item := range statement.Items {
+				if item.Expression == "*" {
+					for position := range definition.Definition.Columns {
+						inherit(position)
+						at++
+					}
+					continue
+				}
+				if expression, parseErr := parser.ParseExpression(item.Expression); parseErr == nil {
+					if id, ok := expression.(parser.Identifier); ok {
+						if position, found := queryColumnIndex(schema, id.Name); found {
+							inherit(position)
+						}
+					}
+				}
+				at++
+			}
+		}
 	}
 	return query, err
 }

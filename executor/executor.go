@@ -162,6 +162,8 @@ type Engine struct {
 	Replica         storageengine.Replica
 	catalogMutex    sync.Mutex
 	catalogRevision uint64
+	statisticsMu    sync.Mutex
+	statisticsCache map[string]tableStatisticsEntry
 	QueryOptions    QueryOptions
 	Store           *storage.Store
 	Users           *catalog.Users

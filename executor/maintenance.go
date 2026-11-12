@@ -23,9 +23,13 @@ func (e *Engine) executeSQLMaintenance(ctx context.Context, session *Session, s 
 		m, err := maintenance.Backup(ctx, s.Path)
 		return &Result{Message: fmt.Sprintf("MVCC backup bytes=%d head=%d sha256=%s", m.Bytes, m.Head, m.SHA256)}, err
 	case "RESTORE":
+		e.statisticsMu.Lock()
 		if err := maintenance.RestoreBackup(ctx, s.Path); err != nil {
+			e.statisticsMu.Unlock()
 			return nil, err
 		}
+		clear(e.statisticsCache)
+		e.statisticsMu.Unlock()
 		e.catalogMutex.Lock()
 		e.catalogRevision = ^uint64(0)
 		e.catalogMutex.Unlock()

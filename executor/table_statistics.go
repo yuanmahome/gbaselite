@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"gbaselite/sqllayout"
 	"gbaselite/storageengine"
@@ -14,6 +15,11 @@ type TableStatistics struct {
 	Rows        int64
 	DataLength  int64
 	IndexLength int64
+}
+
+type tableStatisticsEntry struct {
+	revision uint64
+	value    TableStatistics
 }
 
 // TableStatistics counts the rows and encoded bytes of one table by scanning its
@@ -29,6 +35,18 @@ func (e *Engine) TableStatistics(ctx context.Context, database, table string) (T
 		return TableStatistics{}, err
 	}
 	defer tx.Rollback()
+	if err := ctx.Err(); err != nil {
+		return TableStatistics{}, err
+	}
+	// A committed snapshot is also the cache generation: any committed write,
+	// restore or schema change must miss, while repeated GUI metadata probes reuse
+	// the same exact counts. Bound the cache independently of schema count.
+	key := strings.ToLower(database) + "\x00" + strings.ToLower(table)
+	e.statisticsMu.Lock()
+	defer e.statisticsMu.Unlock()
+	if cached, ok := e.statisticsCache[key]; ok && cached.revision == tx.Snapshot() {
+		return cached.value, nil
+	}
 	definition, _, _, err := loadVersionedTableForRead(tx, &Session{CurrentDatabase: database}, table)
 	if err != nil {
 		return TableStatistics{}, err
@@ -51,5 +69,12 @@ func (e *Engine) TableStatistics(ctx context.Context, database, table string) (T
 			}
 		}
 	}
+	if len(e.statisticsCache) >= 256 {
+		clear(e.statisticsCache)
+	}
+	if e.statisticsCache == nil {
+		e.statisticsCache = make(map[string]tableStatisticsEntry)
+	}
+	e.statisticsCache[key] = tableStatisticsEntry{revision: tx.Snapshot(), value: statistics}
 	return statistics, nil
 }
