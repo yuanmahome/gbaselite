@@ -72,10 +72,11 @@ type authenticationFailure struct {
 const maxTrackedAuthenticationFailures = 4096
 
 func (s *MySQLServer) ListenAndServe() error {
-	listener, err := net.Listen("tcp", s.Address)
+	listener, err := Listen(s.Address)
 	if err != nil {
 		return err
 	}
+	defer listener.Close()
 	return s.Serve(listener)
 }
 
@@ -89,7 +90,7 @@ func (s *MySQLServer) Serve(listener net.Listener) error {
 			s.connectionSlots = make(chan struct{}, s.MaxConnections)
 		}
 	})
-	s.Logger.Printf("MySQL protocol listening on %s", listener.Addr())
+	s.Logger.Printf("MySQL protocol listening on %s", listenerAddresses(listener))
 	for {
 		if s.connectionSlots != nil {
 			for !s.stopping.Load() {

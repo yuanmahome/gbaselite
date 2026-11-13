@@ -121,7 +121,7 @@ func runServerControlled(args []string, externalStop <-chan struct{}, ready chan
 	if err != nil {
 		return startupFailure(err)
 	}
-	listener, err := net.Listen("tcp", cfg.Address())
+	listener, err := server.Listen(cfg.Address())
 	if err != nil {
 		return startupFailure(fmt.Errorf("listen on %s: %w", cfg.Address(), err))
 	}
